@@ -1,11 +1,4 @@
-fastapi==0.110.0
-uvicorn==0.27.1
-pydantic==2.6.3
-transformers==4.38.2
---extra-index-url https://download.pytorch.org/whl/cpu
-torch
 fastapi
 uvicorn
-transformers
-accelerate==0.27.2
-sentencepiece==0.2.0
+requests
+python-dotenv
