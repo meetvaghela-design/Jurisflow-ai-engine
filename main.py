@@ -1,91 +1,58 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from transformers import pipeline
-import torch
-import time
+import requests
+import os
 
-# Initialize FastAPI app
-app = FastAPI(title="JurisFlow AI Engine")
+app = FastAPI()
 
-# Enable CORS for frontend integration
+# CORS allow karna taaki Next.js frontend se connect ho sake
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Adjust this to your frontend URL in production
-    allow_credentials=True,
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Load the lightweight instruction-tuned model
-# LaMini-GPT-124M is ~500MB and runs well on CPUs/small servers
-MODEL_NAME = "MBZUAI/LaMini-GPT-124M"
-
-print(f"Loading AI model: {MODEL_NAME}...")
-try:
-    # Use CPU by default for broader compatibility; change to "cuda" if GPU is available
-    device = 0 if torch.cuda.is_available() else -1
-    generator = pipeline("text-generation", model=MODEL_NAME, device=device)
-    print("Model loaded successfully!")
-except Exception as e:
-    print(f"Error loading model: {e}")
-    generator = None
+# Hugging Face Settings (Aap apni API Key baad mein Render mein daal sakte hain)
+# Model: Meta Llama 3
+HF_API_URL = "https://api-inference.huggingface.co/models/meta-llama/Meta-Llama-3-8B-Instruct"
+HF_TOKEN = os.getenv("HF_TOKEN")
 
 class ContractRequest(BaseModel):
     contract_type: str
     client_name: str
-    company_name: str
+    your_company: str
     jurisdiction: str
-    extra_clauses: str = ""
+    extra_clauses: str
 
 @app.get("/")
-async def root():
-    return {"status": "JurisFlow AI Engine is running", "model": MODEL_NAME}
+def home():
+    return {"status": "JurisFlow AI Engine is Running"}
 
 @app.post("/generate-contract")
-async def generate_contract(request: ContractRequest):
-    if not generator:
-        raise HTTPException(status_code=503, detail="AI Model not loaded")
+def generate_contract(request: ContractRequest):
+    prompt = f"""
+    Act as a Senior Corporate Lawyer. Draft a highly professional {request.contract_type}.
+    - Client Name: {request.client_name}
+    - Provider/Company: {request.your_company}
+    - Jurisdiction: {request.jurisdiction}
+    - Specific Requirements: {request.extra_clauses}
+    
+    Ensure the document is legally sound, uses formal terminology, and includes standard clauses for {request.jurisdiction} law.
+    """
 
-    # Construct a detailed prompt for the instruction-tuned model
-    prompt = (
-        f"Generate a professional {request.contract_type} legal document. "
-        f"The agreement is between {request.company_name} (Disclosing Party) and {request.client_name} (Receiving Party). "
-        f"The jurisdiction for this contract is {request.jurisdiction}. "
-        f"Include the following specific requirements: {request.extra_clauses}. "
-        f"The contract should be formal, legally structured, and include standard clauses for {request.contract_type}."
-    )
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+    payload = {
+        "inputs": prompt,
+        "parameters": {"max_new_tokens": 1000, "temperature": 0.7}
+    }
 
-    try:
-        start_time = time.time()
-        # Generate text with controlled randomness
-        results = generator(
-            prompt, 
-            max_length=800, 
-            num_return_sequences=1, 
-            temperature=0.7, 
-            do_sample=True,
-            truncation=True
-        )
-        
-        generated_text = results[0]['generated_text']
-        
-        # Simple cleanup: Remove the prompt from the output if the model repeats it
-        clean_text = generated_text.replace(prompt, "").strip()
-        
-        return {
-            "status": "success",
-            "generation_time": f"{round(time.time() - start_time, 2)}s",
-            "contract_draft": clean_text,
-            "metadata": {
-                "type": request.contract_type,
-                "jurisdiction": request.jurisdiction,
-                "model": MODEL_NAME
-            }
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
+    response = requests.post(HF_API_URL, headers=headers, json=payload)
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    if response.status_code != 200:
+        raise HTTPException(status_code=500, detail="AI Model is busy or Token is missing.")
+
+    result = response.json()
+    return {"contract": result[0]['generated_text']}
+    
