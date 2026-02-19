@@ -6,7 +6,6 @@ import os
 
 app = FastAPI()
 
-# CORS allow karna taaki Next.js frontend se connect ho sake
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -14,10 +13,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Hugging Face Settings (Aap apni API Key baad mein Render mein daal sakte hain)
-# Model: Meta Llama 3
-HF_API_URL = "https://api-inference.huggingface.co/models/meta-llama/Meta-Llama-3-8B-Instruct"
-HF_TOKEN = os.getenv("HF_TOKEN")
+# Groq Settings
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 class ContractRequest(BaseModel):
     contract_type: str
@@ -28,31 +26,31 @@ class ContractRequest(BaseModel):
 
 @app.get("/")
 def home():
-    return {"status": "JurisFlow AI Engine is Running"}
+    return {"status": "JurisFlow AI Engine (Groq) is Running"}
 
 @app.post("/generate-contract")
 def generate_contract(request: ContractRequest):
-    prompt = f"""
-    Act as a Senior Corporate Lawyer. Draft a highly professional {request.contract_type}.
-    - Client Name: {request.client_name}
-    - Provider/Company: {request.your_company}
-    - Jurisdiction: {request.jurisdiction}
-    - Specific Requirements: {request.extra_clauses}
-    
-    Ensure the document is legally sound, uses formal terminology, and includes standard clauses for {request.jurisdiction} law.
-    """
+    if not GROQ_API_KEY:
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY is missing in Render settings.")
 
-    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+    prompt = f"Draft a professional {request.contract_type} for {request.client_name} and {request.your_company} in {request.jurisdiction}. Clauses: {request.extra_clauses}"
+
     payload = {
-        "inputs": prompt,
-        "parameters": {"max_new_tokens": 1000, "temperature": 0.7}
+        "model": "llama-3.3-70b-versatile",
+        "messages": [
+            {"role": "system", "content": "You are a senior lawyer drafting ironclad legal contracts."},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.7
     }
 
-    response = requests.post(HF_API_URL, headers=headers, json=payload)
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+    
+    response = requests.post(GROQ_API_URL, headers=headers, json=payload)
 
     if response.status_code != 200:
-        raise HTTPException(status_code=500, detail="AI Model is busy or Token is missing.")
+        return {"error": "Groq API error", "details": response.text}
 
     result = response.json()
-    return {"contract": result[0]['generated_text']}
+    return {"contract": result['choices'][0]['message']['content']}
     
